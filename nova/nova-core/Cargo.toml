@@ -1,0 +1,8 @@
+[package]
+name = "nova-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+libc = "0.2.186"
+nix = { version = "0.31.3", features = ["ptrace", "process", "signal"] }
