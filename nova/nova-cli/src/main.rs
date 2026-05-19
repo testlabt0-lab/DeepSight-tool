@@ -12,6 +12,33 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Install a hardware breakpoint (stealth hook)
+    HwHook {
+        #[arg(short, long)]
+        pid: i32,
+        /// Address to hook
+        #[arg(short, long)]
+        target: String,
+    },
+    /// Install an inline hook
+    Hook {
+        #[arg(short, long)]
+        pid: i32,
+        /// Address to hook
+        #[arg(short, long)]
+        target: String,
+        /// Address to jump to
+        #[arg(short='j', long)]
+        hook: String,
+    },
+    /// Allocate memory in the target process
+    Alloc {
+        #[arg(short, long)]
+        pid: i32,
+        /// Size to allocate
+        #[arg(short, long)]
+        size: usize,
+    },
     /// Read memory from a process
     Read {
         #[arg(short, long)]
@@ -83,6 +110,48 @@ fn main() {
                 Err(e) => eprintln!("Failed to get maps: {}", e),
             }
         }
+        Commands::HwHook { pid, target } => {
+            let target_addr = usize::from_str_radix(target.trim_start_matches("0x"), 16).expect("Invalid target format");
+            let process = Process::new(pid);
+            if let Err(e) = process.attach() {
+                eprintln!("Failed to attach: {}", e);
+                return;
+            }
+            let mut hw_manager = nova_core::hwbp::HwBreakpointManager::new(&process);
+            match hw_manager.set_exec_breakpoint(target_addr) {
+                Ok(dr) => println!("Hardware hook installed on DR{} at {:#x}", dr, target_addr),
+                Err(e) => eprintln!("HW Hook failed: {}", e),
+            }
+            let _ = process.detach();
+        }
+        Commands::Hook { pid, target, hook } => {
+            let target_addr = usize::from_str_radix(target.trim_start_matches("0x"), 16).expect("Invalid target format");
+            let hook_addr = usize::from_str_radix(hook.trim_start_matches("0x"), 16).expect("Invalid hook format");
+            let process = Process::new(pid);
+            if let Err(e) = process.attach() {
+                eprintln!("Failed to attach: {}", e);
+                return;
+            }
+            let hook_engine = nova_core::hook::HookEngine::new(&process);
+            match hook_engine.create_inline_hook(target_addr, hook_addr) {
+                Ok(trampoline) => println!("Hook installed! Trampoline allocated at {:#x}", trampoline),
+                Err(e) => eprintln!("Hook failed: {}", e),
+            }
+            let _ = process.detach();
+        }
+        Commands::Alloc { pid, size } => {
+            let process = Process::new(pid);
+            if let Err(e) = process.attach() {
+                eprintln!("Failed to attach: {}", e);
+                return;
+            }
+            let remote = nova_core::remote::RemoteExecution::new(&process);
+            match remote.allocate_memory(size) {
+                Ok(addr) => println!("Successfully allocated {} bytes at {:#x}", size, addr),
+                Err(e) => eprintln!("Allocation failed: {}", e),
+            }
+            let _ = process.detach();
+        }
         Commands::Scan { pid, sig } => {
             let signature = Signature::parse(&sig).expect("Invalid signature format");
             let process = Process::new(pid);
@@ -116,3 +185,7 @@ fn main() {
         }
     }
 }
+
+// In the CLI we can add a simple command to test allocation
+
+// In the CLI we can add a simple command to test hooking
