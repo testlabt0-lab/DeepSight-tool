@@ -12,6 +12,23 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Run a JavaScript file (Frida style)
+    Run {
+        /// Path to the JS script
+        #[arg(short, long)]
+        script: String,
+    },
+    /// Inject a shared library (.so)
+    Inject {
+        #[arg(short, long)]
+        pid: i32,
+        /// Path to the .so file
+        #[arg(short, long)]
+        lib: String,
+        /// Address of dlopen in the target process (hex)
+        #[arg(short, long)]
+        dlopen: String,
+    },
     /// Install a hardware breakpoint (stealth hook)
     HwHook {
         #[arg(short, long)]
@@ -109,6 +126,27 @@ fn main() {
                 }
                 Err(e) => eprintln!("Failed to get maps: {}", e),
             }
+        }
+        Commands::Run { script } => {
+            let js_code = std::fs::read_to_string(&script).expect("Failed to read script file");
+            let engine = nova_cli::js::ScriptEngine::new();
+            if let Err(e) = engine.execute(&js_code) {
+                eprintln!("JS Execution failed: {}", e);
+            }
+        }
+        Commands::Inject { pid, lib, dlopen } => {
+            let dlopen_addr = usize::from_str_radix(dlopen.trim_start_matches("0x"), 16).expect("Invalid dlopen address");
+            let process = Process::new(pid);
+            if let Err(e) = process.attach() {
+                eprintln!("Failed to attach: {}", e);
+                return;
+            }
+            let remote = nova_core::remote::RemoteExecution::new(&process);
+            match remote.inject_library(&lib, dlopen_addr) {
+                Ok(handle) => println!("Successfully injected {}! Handle: {:#x}", lib, handle),
+                Err(e) => eprintln!("Injection failed: {}", e),
+            }
+            let _ = process.detach();
         }
         Commands::HwHook { pid, target } => {
             let target_addr = usize::from_str_radix(target.trim_start_matches("0x"), 16).expect("Invalid target format");
